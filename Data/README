@@ -1,0 +1,3 @@
+This directory contains two datasets. The first is the combBed file from the GENESPACE analysis. It forms the basis of the orthogroup PAV results. 
+The second dataset is the output from SyRi which forms the basis of the structural variation (SV) analysis. 
+Data for other figures or analyses are in the supplementary information provided with the manuscript. The specific tables are specified in comments.
