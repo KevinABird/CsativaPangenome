@@ -1,0 +1,324 @@
+---
+title: "Pangenome Analysis"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(readxl)
+library(cowplot)
+
+
+#Read output from GeneSpace
+
+combBed <- read.delim("~/Documents/CamelinaPangenome/Data/combined/genespace_29July_splitBySubgenome/results/combBed.txt")
+
+#Wfangle data so rows represent hierarchical orthogroups and columns represent genome x subgenome entries. Values are full gene model names
+GeneSpacewHOGs<-combBed %>% select(globHOG,genome,id) %>% group_by(genome) %>% pivot_wider(names_from = genome, values_from = id,values_fn = toString)
+
+# Modify above dataframe to only include the number of genes in an orthogroup for a particular genome x subgenome entry
+GeneSpacewHOGs_GeneCounts<-combBed %>% select(globHOG,genome,id) %>% group_by(genome) %>% pivot_wider(names_from = genome, values_from = id,values_fn = length)
+
+# Add subgenome-level orthogroup counts together
+GeneSpacewHOGs_GeneCounts_SubgenomeCollapse <-GeneSpacewHOGs_GeneCounts %>% replace(is.na(.), 0) %>% mutate(Acsn226=Acsn226_sg1+Acsn226_sg2+Acsn226_sg3,Ames1043=Ames1043_sg1+Ames1043_sg2+Ames1043_sg3,Borowska=Borowska_sg1+Borowska_sg2+Borowska_sg3,CAM70=CAM70_sg1+CAM70_sg2+CAM70_sg3, CAM116=CAM116_sg1+CAM116_sg2+CAM116_sg3,CN113611=CN113611_sg1+CN113611_sg2+CN113611_sg3,Giessen4=Giessen4_sg1+Giessen4_sg2+Giessen4_sg3,Joelle=Joelle_sg1+Joelle_sg2+Joelle_sg3,Licalla=Licalla_sg1+Licalla_sg2+Licalla_sg3,Lindo=Lindo_sg1+Lindo_sg2+Lindo_sg3, Prytzh=Prytzh_sg1+Prytzh_sg2+Prytzh_sg3,Svalof=Svalof_sg1+Svalof_sg2+Svalof_sg3) %>% select(globHOG,Athaliana,Acsn226,Ames1043,Borowska,CAM70,CAM116,CN113611,Giessen4,Joelle,Licalla,Lindo,Prytzh,Svalof) 
+
+# Convert gene count dataframe to a binary presence/absence dataframe. 0 represents absence, 1 represents presence
+GeneSpacewHOGs_PAV <- GeneSpacewHOGs_GeneCounts %>% mutate_if(is.numeric, ~1 * (. != 0)) %>% column_to_rownames(.,var="globHOG")
+
+# Add subgenome-level orthogroup PAV together
+GeneSpacewHOGs_PAV_SubgenomeCollapse <- GeneSpacewHOGs_PAV %>% replace(is.na(.), 0) %>%  mutate(Acsn226=Acsn226_sg1+Acsn226_sg2+Acsn226_sg3,Ames1043=Ames1043_sg1+Ames1043_sg2+Ames1043_sg3,Borowska=Borowska_sg1+Borowska_sg2+Borowska_sg3,CAM70=CAM70_sg1+CAM70_sg2+CAM70_sg3, CAM116=CAM116_sg1+CAM116_sg2+CAM116_sg3,CN113611=CN113611_sg1+CN113611_sg2+CN113611_sg3,Giessen4=Giessen4_sg1+Giessen4_sg2+Giessen4_sg3,Joelle=Joelle_sg1+Joelle_sg2+Joelle_sg3,Licalla=Licalla_sg1+Licalla_sg2+Licalla_sg3,Lindo=Lindo_sg1+Lindo_sg2+Lindo_sg3, Prytzh=Prytzh_sg1+Prytzh_sg2+Prytzh_sg3,Svalof=Svalof_sg1+Svalof_sg2+Svalof_sg3) %>% select(Athaliana,Acsn226,Ames1043,Borowska,CAM70,CAM116,CN113611,Giessen4,Joelle,Licalla,Lindo,Prytzh,Svalof) %>% mutate(Total=rowSums(.))
+
+# Modify for Camelina pangenome PAV analysis:  make binary PAV dataframe by replacing any values over 1 with 1 and keeping 0s. 1 is present, 0 is absent. remove Arabidopsis and Total columns and calculae total number of genomes that contain at least one gene in the orthogroup.
+
+HOG_Orthogroups.GeneCount<-GeneSpacewHOGs_PAV_SubgenomeCollapse %>% mutate_if(is.numeric, ~1 * (. != 0)) %>% select(-Athaliana,-Total) %>% mutate(Total=rowSums(.)) %>% filter(Total > 0)
+
+#Create new column to identify orthogroups as "Core", "Dispensible", and "Unique" based on values in Total column
+HOG_Orthogroups.GeneCount$GeneFamilyType="NA"
+HOG_Orthogroups.GeneCount[HOG_Orthogroups.GeneCount$Total==12,]$GeneFamilyType="Core"
+HOG_Orthogroups.GeneCount[HOG_Orthogroups.GeneCount$Total==1,]$GeneFamilyType="Unique"
+HOG_Orthogroups.GeneCount[HOG_Orthogroups.GeneCount$Total<12 & HOG_Orthogroups.GeneCount$Total > 1,]$GeneFamilyType="Dispensible"
+
+#Plot (Fig 4A in manuscript)
+ggplot(HOG_Orthogroups.GeneCount,aes(x=Total,fill=GeneFamilyType)) + geom_histogram(bins = 12) + scale_x_continuous(breaks=c(1:12)) + labs(x="Genomes",y="Orthogroups") +  scale_fill_manual(values = c("#B43E44", "#FADF92" , "#496496","#F2C9D5", "#282828", "#904869")) + theme_cowplot(12)
+
+```
+
+``` {r open/closed pangenome}
+
+# Series of commands that takes all combinations of n genomes and counts how many orthogroups are core compared to total pangenome size.
+PanGenome_1s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 1, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_1s)<-c(0,1)
+CorePan1<-PanGenome_1s %>% summarise(Core=`1`,Pan=`1`,Genomes=1)
+
+PanGenome_2s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 2, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_2s)<-c(0,1,2)
+CorePan2<-PanGenome_2s %>% summarise(Core=`2`,Pan=`1`+`2`,Genomes=2)
+  
+  
+PanGenome_3s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 3, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_3s)<-c(0,1,2,3)
+CorePan3<-PanGenome_3s %>% summarise(Core=`3`,Pan=`1`+`2`+`3`,Genomes=3)
+
+PanGenome_4s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 4, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_4s)<-c(0,1,2,3,4)
+CorePan4<-PanGenome_4s %>% summarise(Core=`4`,Pan=`1`+`2`+`3`+`4`,Genomes=4)
+
+PanGenome_5s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 5, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_5s)<-c(0,1,2,3,4,5)
+CorePan5<-PanGenome_5s %>% summarise(Core=`5`,Pan=`1`+`2`+`3`+`4` + `5`,Genomes=5)
+
+PanGenome_6s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 6, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_6s)<-c(0,1,2,3,4,5,6)
+CorePan6<-PanGenome_6s %>% summarise(Core=`6`,Pan=`1`+`2`+`3`+`4` + `5` + `6`,Genomes=6)
+
+PanGenome_7s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 7, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_7s)<-c(0,1,2,3,4,5,6,7)
+CorePan7<-PanGenome_7s %>% summarise(Core=`7`,Pan=`1`+`2`+`3`+`4` + `5` + `6` + `7`,Genomes=7)
+
+PanGenome_8s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 8, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_8s)<-c(0,1,2,3,4,5,6,7,8)
+CorePan8<-PanGenome_8s %>% summarise(Core=`8`,Pan=`1`+`2`+`3`+`4` + `5` + `6` + `7`+ `8`,Genomes=8)
+
+PanGenome_9s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 9, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_9s)<-c(0,1,2,3,4,5,6,7,8,9)
+CorePan9<-PanGenome_9s %>% summarise(Core=`9`,Pan=`1`+`2`+`3`+`4` + `5` + `6` + `7`+ `8` + `9`,Genomes=9)
+
+PanGenome_10s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 10, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_10s)<-c(0,1,2,3,4,5,6,7,8,9,10)
+CorePan10<-PanGenome_10s %>% summarise(Core=`10`,Pan=`1`+`2`+`3`+`4` + `5` + `6` + `7`+ `8` + `9` + `10`,Genomes=10)
+
+PanGenome_11s<-lapply(X = combn(HOG_Orthogroups.GeneCount[1:12], 11, simplify=FALSE), FUN=rowSums) %>% 
+   lapply(.,FUN=table) %>%
+  do.call(rbind.data.frame,.) 
+ colnames(PanGenome_11s)<-c(0,1,2,3,4,5,6,7,8,9,10,11)
+CorePan11<-PanGenome_11s %>% summarise(Core=`11`,Pan=`1`+`2`+`3`+`4` + `5` + `6` + `7`+ `8` + `9` + `10` + `11`,Genomes=11)
+
+
+CorePan12<-data.frame(
+  "Core"=nrow(HOG_Orthogroups.GeneCount[HOG_Orthogroups.GeneCount$GeneFamilyType=="Core",]),
+  "Pan"=nrow(HOG_Orthogroups.GeneCount),
+  "Genomes"=12
+)
+
+#Combine all the dataframes sumamrise the number of core and pan orthogroups from 1 to 12
+CorePan<-rbind(CorePan1,CorePan2,CorePan3,CorePan4,CorePan5,CorePan6,CorePan7,CorePan8,CorePan9,CorePan10,CorePan11,CorePan12)
+CorePan<-CorePan %>% gather("Type","Count",1:2)
+
+#Plot (Fig 4B in manuscript)
+ggplot(data=CorePan,aes(x=Genomes,y=Count,group=Type,colour=Type)) + geom_point() + geom_smooth(se=F) + scale_x_continuous(breaks=c(1:12)) +  scale_colour_manual(values = c("#B43E44", "#496496")) + theme_cowplot(12)
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r subgenome specific orthogroups}
+library(networkD3)
+
+#Extract Arabiopdsis orthogrounp counts and counts for each subgenome
+Orthogroups_At<- GeneSpacewHOGs %>% column_to_rownames(var="globHOG") %>% select(Athaliana) %>% mutate_all(~ if_else(is.na(.), 0, 1))
+Orthogroups_SG1<- GeneSpacewHOGs %>% column_to_rownames(var="globHOG") %>% select(contains("_sg1")) %>% mutate_all(~ if_else(is.na(.), 0, 1))
+Orthogroups_SG2<- GeneSpacewHOGs %>% column_to_rownames(var="globHOG") %>% select(contains("_sg2")) %>% mutate_all(~ if_else(is.na(.), 0, 1))
+Orthogroups_SG3<- GeneSpacewHOGs %>% column_to_rownames(var="globHOG") %>% select(contains("_sg3")) %>% mutate_all(~ if_else(is.na(.), 0, 1))
+
+# Classify the Arabidopsis orthogroups as being present or absent
+Orthogroups_At$Subgenome<-"At"
+Orthogroups_At$GeneFamilyType="NA"
+Orthogroups_At[Orthogroups_At$Athaliana==1,]$GeneFamilyType="Present"
+Orthogroups_At[Orthogroups_At$Athaliana==0,]$GeneFamilyType="Absent"
+colnames(Orthogroups_At)<-c("Total","Subgenome","GeneFamilyType")
+
+# Classify the C. sativa orthogroups as being present or absent in Subgenome 1 
+
+Orthogroups_SG1$Total<-rowSums(Orthogroups_SG1)
+
+Orthogroups_SG1$Subgenome<-"SG1"
+Orthogroups_SG1$GeneFamilyType="NA"
+Orthogroups_SG1[Orthogroups_SG1$Total==12,]$GeneFamilyType="Core"
+Orthogroups_SG1[Orthogroups_SG1$Total==1,]$GeneFamilyType="Unique"
+Orthogroups_SG1[Orthogroups_SG1$Total==0,]$GeneFamilyType="Absent"
+Orthogroups_SG1[Orthogroups_SG1$Total<12 & Orthogroups_SG1$Total > 1,]$GeneFamilyType="Dispensible"
+
+# Classify the C. sativa orthogroups as being present or absent in Subgenome 2 
+
+Orthogroups_SG2$Total<-rowSums(Orthogroups_SG2)
+
+Orthogroups_SG2$Subgenome<-"SG2"
+Orthogroups_SG2$GeneFamilyType="NA"
+Orthogroups_SG2[Orthogroups_SG2$Total==12,]$GeneFamilyType="Core"
+Orthogroups_SG2[Orthogroups_SG2$Total==1,]$GeneFamilyType="Unique"
+Orthogroups_SG2[Orthogroups_SG2$Total==0,]$GeneFamilyType="Absent"
+Orthogroups_SG2[Orthogroups_SG2$Total<12 & Orthogroups_SG2$Total > 1,]$GeneFamilyType="Dispensible"
+
+# Classify the C. sativa orthogroups as being present or absent in Subgenome 3 
+
+Orthogroups_SG3$Total<-rowSums(Orthogroups_SG3)
+
+Orthogroups_SG3$Subgenome<-"SG3"
+Orthogroups_SG3$GeneFamilyType="NA"
+Orthogroups_SG3[Orthogroups_SG3$Total==12,]$GeneFamilyType="Core"
+Orthogroups_SG3[Orthogroups_SG3$Total==1,]$GeneFamilyType="Unique"
+Orthogroups_SG3[Orthogroups_SG3$Total==0,]$GeneFamilyType="Absent"
+Orthogroups_SG3[Orthogroups_SG3$Total<12 & Orthogroups_SG3$Total > 1,]$GeneFamilyType="Dispensible"
+
+SG_OrthogroupsPAV<-rbind(Orthogroups_SG1 %>% select(Subgenome,Total,GeneFamilyType),Orthogroups_SG2 %>% select(Subgenome,Total,GeneFamilyType),Orthogroups_SG3 %>% select(Subgenome,Total,GeneFamilyType))
+
+
+# Merge Arabidopsis table with each subgenome
+At_v_SG1_Orthogroups<-cbind(Orthogroups_At %>% relocate(Subgenome,Total,GeneFamilyType),Orthogroups_SG1 %>% select(Subgenome,Total,GeneFamilyType))
+colnames(At_v_SG1_Orthogroups)<- c("Source","At_Total","At_GeneFamilyType","Target","SG1_Total","SG1_GeneFamilyType")
+
+At_v_SG2_Orthogroups<-cbind(Orthogroups_At %>% relocate(Subgenome,Total,GeneFamilyType),Orthogroups_SG2 %>% select(Subgenome,Total,GeneFamilyType))
+colnames(At_v_SG2_Orthogroups)<- c("Source","At_Total","At_GeneFamilyType","Target","SG2_Total","SG2_GeneFamilyType")
+
+At_v_SG3_Orthogroups<-cbind(Orthogroups_At %>% relocate(Subgenome,Total,GeneFamilyType),Orthogroups_SG3 %>% select(Subgenome,Total,GeneFamilyType))
+colnames(At_v_SG3_Orthogroups)<- c("Source","At_Total","At_GeneFamilyType","Target","SG3_Total","SG3_GeneFamilyType")
+
+# Join those tables together to get presence/absence variation for Arabidopsis and all three subgenomes
+At_v_AllSubgenomes<-left_join(rownames_to_column(At_v_SG1_Orthogroups),rownames_to_column(At_v_SG2_Orthogroups),by=c("rowname","Source", "At_Total","At_GeneFamilyType")) %>% left_join(.,rownames_to_column(At_v_SG3_Orthogroups),by=c("rowname","Source", "At_Total","At_GeneFamilyType"))
+
+# Extract orthogroups that are only present on a single subgenome
+At_v_AllSubgenomes %>% filter(At_GeneFamilyType=="Absent" & SG2_GeneFamilyType=="Absent" & SG3_GeneFamilyType=="Absent") -> SG1_UniqueHOGs
+At_v_AllSubgenomes %>% filter(At_GeneFamilyType=="Absent" & SG1_GeneFamilyType=="Absent" & SG3_GeneFamilyType=="Absent") -> SG2_UniqueHOGs
+At_v_AllSubgenomes %>% filter(At_GeneFamilyType=="Absent" & SG1_GeneFamilyType=="Absent" & SG2_GeneFamilyType=="Absent") -> SG3_UniqueHOGs
+
+
+# Create summary table of presence/absence across Arabidopsis and each subgenome
+Orthogroup_flow<-At_v_AllSubgenomes%>% mutate(SG1_GeneFamilyType = replace(SG1_GeneFamilyType,SG1_GeneFamilyType != "Absent","Present"),SG2_GeneFamilyType = replace(SG2_GeneFamilyType,SG2_GeneFamilyType != "Absent","Present"),SG3_GeneFamilyType = replace(SG3_GeneFamilyType,SG3_GeneFamilyType != "Absent","Present")) %>% group_by(At_GeneFamilyType,SG1_GeneFamilyType,SG2_GeneFamilyType,SG3_GeneFamilyType) %>% summarise(count=n())
+
+# Create objects for sankey diagram
+links<-Orthogroup_flow %>% mutate(SG1_GeneFamilyType = replace(SG1_GeneFamilyType,SG1_GeneFamilyType != "Absent","SG1"),SG2_GeneFamilyType = replace(SG2_GeneFamilyType,SG2_GeneFamilyType != "Absent","SG2"),SG3_GeneFamilyType = replace(SG3_GeneFamilyType,SG3_GeneFamilyType != "Absent","SG3")) %>% 
+    mutate(SG1_GeneFamilyType = replace(SG1_GeneFamilyType,SG1_GeneFamilyType == "Absent",""),SG2_GeneFamilyType = replace(SG2_GeneFamilyType,SG2_GeneFamilyType == "Absent", ""),SG3_GeneFamilyType = replace(SG3_GeneFamilyType,SG3_GeneFamilyType == "Absent","")) %>% 
+    unite(Target,SG1_GeneFamilyType,SG2_GeneFamilyType,SG3_GeneFamilyType,sep="-") %>%
+  mutate(At_GeneFamilyType = replace(At_GeneFamilyType,At_GeneFamilyType != "Absent","Arabidopsis")) %>%
+  mutate(At_GeneFamilyType = replace(At_GeneFamilyType,At_GeneFamilyType == "Absent","Not In Arabidopsis")) %>%
+  rename(Source=At_GeneFamilyType,value=count)
+           
+nodes<-data.frame("name"=unique(c(links$Source,links$Target)),"label"= c("Not In Arabidopsis", "Arabidopsis", "SG3 Unique", "SG2 Unique","SG2-SG3","SG1 Unique", "SG1-SG3","SG1-SG2","SG1-SG2-SG3","Lost"))
+
+links$IDsource <- match(links$Source, nodes$name)-1
+links$IDtarget <- match(links$Target, nodes$name)-1
+
+# Make sankey diagram with function from NetworkD3 package (Fig 8A in manuscript)
+Sankey<-sankeyNetwork(Links = links, Nodes = nodes,
+              Source = "IDsource", Target = "IDtarget",
+              Value = "value", NodeID = "label", 
+              sinksRight=FALSE,fontSize = 15,)
+
+```
+
+```{r pathway copy number ratio distributions}
+
+# Load table with GLS pathway ortholog copy number
+GSL_Aliphatic_Sketch <- read.delim("~/Documents/GSL_Aliphatic_Sketch.csv",sep=",")
+Indol_GSL_Full_Sketch <- read.delim("~/Documents/GSL_Indolic_Sketch.csv",sep="\t")
+
+# Calculate ratio of Csativa:Athaliana genes, create category for genes with > 6x copy number ratio and classify C.sative unique genes.
+colnames(Indol_GSL_Full_Sketch) <- colnames(GSL_Aliphatic_Sketch)
+rbind(GSL_Aliphatic_Sketch,Indol_GSL_Full_Sketch) %>% rename("globHOG"="X") %>% drop_na() %>% mutate(across(3:14,~./Arabidopsis)) %>% mutate(Total=rowSums(select(.,3:14))) %>% mutate(Total=replace(Total,Total ==Inf,NaN)) %>% mutate(Total=replace(Total,Total >= 72,72)) %>% mutate(Total=replace_na(Total,84))  -> GLS_HOGs_GeneCounts_SubgenomeCollapse
+
+# Load table with acyl-lipid pathway orthogroup copy number
+load("Lipid_HOG_df_for_DensityPlot")
+
+# Calculate ratio of Csativa:Athaliana genes, create category for genes with > 6x copy number ratio and classify C.sative unique genes.
+GeneSpacewHOGs_GeneCounts_SubgenomeCollapse %>% mutate(across(3:14,~./Athaliana)) %>% mutate(Total=rowSums(select(.,3:14)))  %>% mutate(Total=replace(Total,Total ==Inf,NaN)) %>% mutate(Total=replace(Total,Total >= 72,72)) %>% mutate(Total=replace_na(Total,84))-> All_HOGs
+
+#Combine glucosinolate, acyl-lipid, and global orthogroup tables together
+rbind(GLS_HOGs_GeneCounts_SubgenomeCollapse %>% mutate(Total=Total/12) %>% mutate(Trait="GLS"),Lipid_HOGs_GeneCounts_SubgenomeCollapse_Modified %>% mutate(Total=Total/12) %>% mutate(Trait="Lipid"),All_HOGs %>% mutate(Total=Total/12) %>% mutate(Trait="All Orthogroups"))-> LipidGSLComp 
+
+#Create plot of copy number distribution for 3 datasets (Fig 10 in manuscript)
+ggplot() + geom_density(data=LipidGSLComp,aes(x=Total, group=Trait, fill = Trait,after_stat(scaled)),alpha=0.5,adjust=0.5) + labs(x="Ratio of C.sativa genes to Athaliana") + geom_vline(xintercept=3,color="black",linetype = "longdash")   + scale_x_continuous(breaks=c(0,1,2,3,4,5,6,7),labels=c("Arabidopsis-\nspecific","1","2","3","4","5",">6","Camelina-\nSpecific")) + scale_fill_manual(values = c("#E64B35FF", "#4DBBD5FF", "#00A087FF")) +  theme_cowplot(12)
+
+
+```
+
+```{r glucosinolate and lipid heatmaps}
+library(gplots)
+
+# Load aliphatic glucosinolate ortholog count table (Table S19)
+GSL_Aliphatic_Sketch <- read.delim("~/Documents/GSL_Aliphatic_Sketch.csv",sep=",")
+GSL_Aliphatic_Sketch<-column_to_rownames(GSL_Aliphatic_Sketch,var="X")
+
+# Transform copy number to the ratio of observed to expected copy number (using ploidy as expectation, so expected for C. sativa is 3 and expected for Arabidopsis is 1)
+GSL_Aliphatic_Sketch %>% select(-Arabidopsis) %>% drop_na() %>% as.matrix() -> GSL_Scaled_Csat
+GSL_Scaled_Csat<-GSL_Scaled_Csat/3
+GSL_Aliphatic_Sketch %>% select(Arabidopsis) %>% drop_na() %>% as.matrix() -> GSL_Scaled_At 
+GSL_Scaled_At<-GSL_Scaled_At/1
+
+#combine Arabidopsis and Camelina datasets and convert genes at expected copy number to NA to aid in visualization
+GSL_Scaled<-cbind(GSL_Scaled_At,GSL_Scaled_Csat)
+GSL_Scaled[GSL_Scaled==1]<- NA
+
+# Plot (heatmap base for Fig 11)
+heatmap.2(GSL_Scaled,offsetRow=-29, dendrogram ="none",trace="none",scale = "none",key=F, Rowv = "none",Colv="none",na.color="white",breaks=c(-1,as.numeric(levels(factor(GSL_Scaled)))),col=c("black","black", "#7E7ED3", "#C89E9E", "#D37E7E", "#DE5F5F", "#E93F3F", "#F41F1F", "#FF0000"),sepcolor = "lightgrey",colsep=0:ncol(GSL_Scaled),rowsep=0:nrow(GSL_Scaled),margins = c(6,9.2))
+
+
+
+# Load Indolic glucosinolate ortholog count table (Table S20)
+
+Indol_GSL_Full_Sketch <- read.delim("~/Documents/GSL_Indolic_Sketch.csv",sep=",")
+Indol_GSL_Full_Sketch<-column_to_rownames(Indol_GSL_Full_Sketch,var="X")
+
+# Transform copy number to the deviation from expected copy number (using ploidy as expectation, so expected for C. sativa is 3 and expected for Arabidopsis is 1)
+
+Indol_GSL_Full_Sketch %>% select(-Arabidopsis) %>% drop_na() %>% as.matrix() -> Indol_GSL_Scaled_Csat
+Indol_GSL_Scaled_Csat<-((Indol_GSL_Scaled_Csat-3))
+Indol_GSL_Full_Sketch %>% select(Arabidopsis) %>% drop_na() %>% as.matrix() -> Indol_GSL_Scaled_At 
+Indol_GSL_Scaled_At<-((Indol_GSL_Scaled_At-1)/sd(Indol_GSL_Scaled_At))
+
+#combine Arabidopsis and Camelina datasets and convert genes at expected copy number to NA to aid in visualization
+Indol_GSL_Scaled<-cbind(Indol_GSL_Scaled_At,Indol_GSL_Scaled_Csat)
+Indol_GSL_Scaled[Indol_GSL_Scaled==0]<- NA
+
+# Plot (Fig S9)
+heatmap.2(Indol_GSL_Scaled,offsetRow=-29, dendrogram ="none",trace="none",scale = "none",key=F, Rowv = "none",Colv="none",na.color="white",breaks=as.numeric(levels(factor(Indol_GSL_Scaled))),col=c("black","black", "#7E7ED3", "#C89E9E", "#D37E7E", "#DE5F5F", "#E93F3F", "#F41F1F", "#FF0000"),sepcolor = "lightgrey",colsep=0:ncol(Indol_GSL_Scaled),rowsep=0:nrow(Indol_GSL_Scaled),margins = c(6,9.2))
+
+
+
+
+
+# Read lipid orthogroup copy number table (Table S16)
+Combined_LipidHOGs_scaled_VariableOGs_EnzymeNames_manualedit <- read.delim("~/Documents/CamelinaPangenome/Combined_LipidHOGs_scaled_VariableOGs_EnzymeNames_manualedit.csv")
+
+#Transform to matrix
+Combined_LipidHOGs_scaled_VariableOGs_EnzymeNames_manualedit %>% select(-globHOG,-Athaliana.y) %>% mutate(Final_Annotation=make.unique(Final_Annotation,sep="_")) %>% column_to_rownames("Final_Annotation") %>% as.matrix() -> Lipid_Heatmap_Sketch
+
+#Visualize
+heatmap.2(Lipid_Heatmap_Sketch, dendrogram ="both",trace="none",scale = "none",key=T,breaks=c(-1,as.numeric(levels(factor(Lipid_Heatmap_Sketch)))),col=c("black","#053061","#5B7797", "white", "#EFE4E7", "#E4D3D8", "#DAC1C8", "#CFAFB9", "#C59EAA", "#BA8C9A", "#B07B8B", "#A5697B", "#9B576C", "#86344D", "#71112E", "#67001F","#67001F"),sepcolor = "lightgrey",colsep=0:ncol(Lipid_Heatmap_Sketch),rowsep=0:nrow(Lipid_Heatmap_Sketch),sepwidth = 0.02,margins = c(9,15))
+```
+
+
+
+
+

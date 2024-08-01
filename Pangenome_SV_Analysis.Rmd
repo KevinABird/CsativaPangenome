@@ -1,0 +1,111 @@
+---
+title: "Pangenome_SV_analysis"
+author: "Kevin Bird"
+date: "2024-07-30"
+output: html_document
+---
+
+```{r setup, }
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+```
+
+```{r data}
+# load SV files from SyRi output
+
+SyRiFiles<-list.files(path="~/Documents/CamelinaPangenome/Data/SyRI_output/",)
+
+for (Indiv in SyRiFiles){
+ InFile<-read.delim(file=sprintf('Data/SyRI_output/%s',Indiv), header=F)
+   InFile %>% mutate("Ref_Size"=abs(as.numeric(V3)-as.numeric(V2)),"Query_Size"=abs(as.numeric(V8)-as.numeric(V7))) %>% 
+     mutate("Line"=sprintf('%s',Indiv)) %>%
+     assign(sprintf("%s",Indiv),., .GlobalEnv)
+}
+
+SVCalls<-do.call(rbind,mget(SyRiFiles))
+
+# Clean up names
+
+SVCalls$Line <- gsub("_asm05_10000_0.95.syri.out","",SVCalls$Line)
+SVCalls$Line <- gsub("filtered_Csativa","",SVCalls$Line)
+
+# Files are large, mostly due to a large number of SNPs, which we are not interested in. Filter out SNPs
+SVCalls <- SVCalls %>% filter(V11!="SNP")
+
+# Add column to identify sequences as yntenic which is assigned in column 10 and 11 with "SYN" and "non-syntenic", here is defined as things not identified "SYN" and include large SVs like translocations, inversions, and duplications.
+
+SVCalls$Sequence_Type <- "NonSyntenic"
+SVCalls[grepl("SYN",SVCalls$V10),]$Sequence_Type<-"Syntenic"
+SVCalls[SVCalls$V11=="SYN",]$Sequence_Type<-"Syntenic"
+
+# Create categories "Not in Reference" and "Not in Query" to capture regions where sequences in one genome do not align to a region in the other. These are likely large-scale deletions or complex SVs, given the contiguity of these genomes.
+
+SVCalls[is.na(SVCalls$Ref_Size),]$V11<-"Not in Reference"
+SVCalls[is.na(SVCalls$Query_Size),]$V11<-"Not in Query"
+
+# Make a new "size" column which synthesizes info from query size and reference size columns. Use reference size to define size of a "Not in Query" event, use the difference between reference and query size for the copy gain and copy loss events, use reference size to define the size of deletion events.
+
+SVCalls[SVCalls$V11=="Not in Query",]$Query_Size<-(SVCalls[SVCalls$V11=="Not in Query",]$Ref_Size*-1)
+SVCalls$Size<-SVCalls$Query_Size
+SVCalls[SVCalls$V11=="CPG",]$Size<-(SVCalls[SVCalls$V11=="CPG",]$Query_Size-SVCalls[SVCalls$V11=="CPG",]$Ref_Size)
+SVCalls[SVCalls$V11=="CPL",]$Size<-(SVCalls[SVCalls$V11=="CPL",]$Ref_Size-SVCalls[SVCalls$V11=="CPL",]$Query_Size)
+SVCalls[SVCalls$V11=="DEL",]$Size<-SVCalls[SVCalls$V11=="DEL",]$Ref_Size
+
+# Very long, hard-coding of subgenome designation of SVs
+
+SVCalls<-SVCalls %>% mutate(Subgenome= case_when(V6 == "Chr01" | V6 =="Chr03" | V6== "Chr06" | V6=="Chr10"|V6=="Chr13"|V6=="Chr16"|V6=="chr18" ~"SG2", V6=="Chr19" | V6=="Chr14" |V6=="Chr04" | V6=="Chr11" | V6=="Chr08" | V6== "Chr07" ~ "SG1", V6=="Chr15"|V6=="Chr17"|V6=="Chr09" | V6=="Chr12" | V6=="Chr20" | V6=="Chr05" | V6=="Chr02" ~ "SG3"))
+
+```
+
+```{r plotting}
+
+#Make Plot of total size (in Mb) of syntenic and nonsyntenic sequence (Fig 7A)
+Synteny <- SVCalls %>% filter(V11=="SYN"| V11=="DUP"|V11=="INV"| V11=="TRANS"| V11=="INVDP" | V11=="INVTR"| V11=="Not in Reference") %>% 
+  group_by(Line,Sequence_Type) %>% 
+  summarise(Size=sum(abs(Size))) %>%
+  ggplot(aes(x=Size/1000000,y=Line,group=Sequence_Type,fill=Sequence_Type),pall) + geom_bar(stat="identity") + 
+  scale_fill_manual(values = c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF")) + theme_cowplot(12) + theme(legend.position="top") + xlab(label ="Mb") 
+
+
+# Make plot breaking down the sequence occupied by SVs, this time including indels. insertions, duplications, copy gains, and sequences unique to query sequences are combined to be "Present". Deletions, copyloss and sequencees not in the query are combined to be "Absent" (Fig 7B)
+
+Rearrangements <-SVCalls %>% filter(V11=="DUP"|V11=="INV"| V11=="TRANS"| V11=="Not in Reference" | V11=="Not in Query" | V11=="DEL"| V11=="INS"| V11=="CPG" | V11=="CPL") %>%
+  mutate(V11=replace(V11,list = (V11=="DUP" & V12== "copygain") | V11=="Not in Reference" | V11== "INS"| V11=="CPG","Present")) %>% mutate(V11=replace(V11,list = (V11=="DUP" & V12=="copyloss") |V11=="Not in Query" | V11== "DEL"| V11=="CPL","Absent")) %>%
+  group_by(Line,V11) %>% 
+  summarise(Size=sum(abs(Size))) %>%
+  ggplot(.,aes(x=Size/1000000,y=Line,group=factor(V11, levels=c("TRANS","INV","Absent","Present")),fill=factor(V11, levels=c("TRANS","INV","Absent","Present")),)) +  
+  geom_bar(stat="identity") + theme_cowplot(12) + 
+  theme(legend.position="top") +
+  xlab(label ="Mb")  + 
+  scale_fill_manual(name="SV",labels=c("Translocation","Inversion","Absent", "Present"), values = c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF"))
+
+
+
+# Make plot of size distribution of SV (Fig 7C)
+
+SV_size_df <- SVCalls %>% filter(abs(Size)>0) %>%  filter(V11 !="HDR" & V11!="SYN" & V11!="SYNAL" & V11!="DUPAL" & V11!="TRANSAL"& V11!="INVDPAL" & V11!="INVTRAL" & V11 != "SNP" & V11 != "INVAL" & V11 !="INVDP" & V11 !="INVTR")
+ggboxplot(SV_size_df,y= "abs(Size)",x="V11",fill="V11", palette = "npg", orientation = "horizontal",xlab="",ylab="") + 
+  rremove("legend") + 
+  scale_y_log10(labels = function(x) format(x, scientific = T)) + 
+  scale_x_discrete(labels=rev(c("Not in Reference","Tandem","Duplication","Copy Gain","Inversion","Translocation","Copy Loss","Deletion","Insertion","Not in Query"))) -> SV_Size
+
+
+# Make plot of how many SVs are on particular subgenomes (Fig 7D)
+
+SVCalls %>% 
+  filter(V1==V6) %>% drop_na() %>% filter(V11 !="HDR" & V11!="SYN" & V11!="SYNAL" & V11!="DUPAL" & V11!="TRANSAL"& V11!="INVDPAL" & V11!="INVTRAL" & V11 != "SNP" & V11 != "INVAL" & V11 !="INVDP" & V11 !="INVTR" & V11 !="INS" & V11 != "DEL") %>% 
+  ggplot(aes(x=Subgenome,group=V11,fill=V11)) + geom_bar(stat="count",position="stack") + theme_cowplot(12) + scale_fill_manual(name="SV",labels=c("Copy Gain","Copy Loss","Duplication", "Inversion","Tandem","Translocation"), values = c("#91D1C2FF", "#3C5488FF", "#DC0000FF", "#8491B4FF", "#7E6148FF", "#F39B7FFF")) -> SVSubgenome
+
+plot_grid(Synteny,Rearrangements,SV_Size,SVSubgenome)
+```
+
+```{r HE Analysis}
+# Homoeologous exchange (interchromsomal translocation) Analysis
+
+# filter for translocations or inversion + translocation combinations where reference sequence location and query sequence location are different subgenomes.
+SVCalls %>% filter( V1 != "-" & V6 != "-" & V1 != V6) %>% filter(V11 == "TRANS" | V11 == "INVTR") %>%
+filter(((V1=="Chr14" | V1== "Chr07" | V1=="Chr19"| V1== "Chr04" | V1== "Chr08" | V1== "Chr11") & (V6=="Chr03" | V6== "Chr16" | V6== "Chr01" | V6== "Chr06" | V6== "Chr13" | V6== "Chr10" | V6== "Chr18")) | ((V1=="Chr14" | V1== "Chr07" | V1=="Chr19" | V1== "Chr04" | V1== "Chr08" | V1== "Chr11") & (V6=="Chr17" | V6== "Chr05" | V6=="Chr15" | V6== "Chr09" | V6== "Chr20" | V6 == "Chr02" | V6== "Chr12")) | ((V1=="Chr03" | V1== "Chr16" | V1== "Chr01" | V1== "Chr06" | V1== "Chr13" | V1== "Chr10" | V1== "Chr18") & (V6=="Chr14" | V6== "Chr07" | V6=="Chr19"| V6== "Chr04"| V6== "Chr08"| V6== "Chr11")) | ((V1=="Chr03" | V1== "Chr16"| V1== "Chr01"| V1== "Chr06"| V1== "Chr13"| V1== "Chr10"|V1== "Chr18") & (V6=="Chr17" | V6== "Chr05" | V6=="Chr15" | V6== "Chr09" | V6== "Chr20" | V6 == "Chr02" | V6== "Chr12")) | ((V1=="Chr17"| V1== "Chr05" | V1=="Chr15" | V1== "Chr09" | V1== "Chr20" | V1 == "Chr02" | V1== "Chr12") &(V6=="Chr03"|V6== "Chr16"|V6== "Chr01"|V6== "Chr06"|V6== "Chr13"|V6== "Chr10"|V6== "Chr18")) | ((V1=="Chr17"| V1== "Chr05" | V1=="Chr15" | V1== "Chr09" | V1== "Chr20" | V1 == "Chr02" | V1== "Chr12") & (V6=="Chr14" | V6== "Chr07" | V6=="Chr19"| V6== "Chr04"| V6== "Chr08"|V6== "Chr11"))) -> HE_Table
+
+HE_Table %>% group_by(Line) %>% reframe(count=n(),HE=sum(Ref_Size),percent=(HE/639100000)*100) %>% unique() -> HE_Summary
+

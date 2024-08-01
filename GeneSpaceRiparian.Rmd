@@ -1,0 +1,62 @@
+---
+title: "GeneSpaceRiparian"
+author: "Kevin Bird"
+date: "2024-03-12"
+output: html_document
+---
+
+```{r}
+library(GENESPACE)
+load("GeneSpaceOut")
+```
+
+```{r Fig 1B}
+customPal <- colorRampPalette(
+c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF"))
+
+ripDat <- plot_riparian(
+gsParam=out, useOrder = F,
+genomeIDs=rev(c("Athaliana","Prytzh_sg3","Prytzh_sg2","Prytzh_sg1")),refGenome="Prytzh_sg2",palette = customPal,
+braidAlpha = .75, chrFill = "lightgrey", addThemes= ggthemes)
+```
+
+```{r Fig S5}
+customPal <- colorRampPalette(
+c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF"))
+
+ripDat <- plot_riparian(
+gsParam=out, useOrder = F,
+genomeIDs=rev(c("Acsn226_sg2","Ames1043_sg2", "Borowska_sg2","CAM70_sg2","CAM116_sg2","CN113611_sg2","Giessen4_sg2","Joelle_sg2","Licalla_sg2","Lindo_sg2","Prytzh_sg2","Svalof_sg2")),refGenome="Prytzh_sg2",palette = customPal,
+braidAlpha = .75, chrFill = "lightgrey", addThemes= ggthemes)
+```
+
+```{r Fig S4}
+customPal <- colorRampPalette(
+c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF"))
+
+ripDat <- plot_riparian(
+gsParam=out, useOrder = F,
+genomeIDs=rev(c("Acsn226_sg1","Ames1043_sg1", "Borowska_sg1","CAM70_sg1","CAM116_sg1","CN113611_sg1","Giessen4_sg1","Joelle_sg1","Licalla_sg1","Lindo_sg1","Prytzh_sg1","Svalof_sg1")),refGenome="Prytzh_sg2",palette = customPal,
+braidAlpha = .75, chrFill = "lightgrey", addThemes= ggthemes)
+```
+
+```{r Fig 6}
+customPal <- colorRampPalette(
+c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF"))
+
+ripDat <- plot_riparian(
+gsParam=out, useOrder = F,
+genomeIDs=rev(c("Acsn226_sg3","Ames1043_sg3", "Borowska_sg3","CAM70_sg3","CAM116_sg3","CN113611_sg3","Giessen4_sg3","Joelle_sg3","Licalla_sg3","Lindo_sg3","Prytzh_sg3","Svalof_sg3")),refGenome="Prytzh_sg3",palette = customPal,
+braidAlpha = .75, chrFill = "lightgrey", addThemes= ggthemes)
+```
+
+```{r Fig 9}
+customPal <- colorRampPalette(
+c("#E64B35FF", "#4DBBD5FF", "#00A087FF", "#3C5488FF", "#F39B7FFF", "#8491B4FF"))
+
+ripDat <- plot_riparian(
+gsParam=out, useOrder = F,
+genomeIDs=rev(c("Pryzth_sg3","Pryzth_sg2","Joelle_sg1","CN113611_sg1","Acsn226_sg1","Pryzth_sg1","Svalof_sg1","Licalla_sg1","Lindo_sg1","CAM116_sg1","CAM70_sg1","Giessen4_sg1","Ames1043_sg1","Borowska_sg1")),refGenome="Prytzh_sg1",palette = customPal,
+braidAlpha = .75, chrFill = "lightgrey", addThemes= ggthemes)
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
